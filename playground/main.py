@@ -1,69 +1,27 @@
-import pydicom
-import numpy as np
-from PySide6.QtWidgets import (
-		QApplication, QMainWindow,QVBoxLayout, QWidget, QMenuBar, QFileDialog
-)
+import dicom_read.read_header as read_header
+import dicom_read.read_date as read_data
 
-filepath = 'sample/JPCLN001.dcm'
+# main.py の呼び出し (修正不要)
+def main():
+    # 適切なファイルパスを指定
+    # file = 'sample/JPCLN001.dcm'
+    file = 'sample/2.16.840.1.114362.1.6.0.2.13412.6509808579.332603477.517.284.dcm'
+    transfer_syntax_uid = read_header.get_transfer_syntax_uid(file)
+    print(transfer_syntax_uid)
+    print('---------------------')
 
-
-def load_dicom_data(filepath):
-  """
-  DICOMファイルの読み込み関数
-  ピクセルデータをNumpy配列に変換し、メタデータを辞書で返す。
-  
-  Args:
-		filepath (str): DICOMファイルのパス
-	Returns:
-		pixel_array (np.ndarray): ピクセルデータのNumpy配列
-		meta_data (dict): メタデータの辞書
-	"""
-  try:
-    ds = pydicom.dcmread(filepath)
-  except Exception as e:
-    print(f'DICOMファイルの読み込みに失敗しました: {e}')
-    return None, None
-
-  # ピクセルデータをNumpy配列に変換
-  pixel_array = ds.pixel_array.astype(np.int16)
-
-	# メタデータの取得
-  rescale_slope = ds.get('RescaleSlope', 1)
-  rescale_intercept = ds.get('RescaleIntercept', 0)
-  window_center = ds.get('WindowCenter', None)
-  window_width = ds.get('WindowWidth', None)
-  bits_stored = ds.get('BitsStored', None)
-
-  meta_data = {
-    'RescaleSlope': rescale_slope,
-    'RescaleIntercept': rescale_intercept,
-    'WindowCenter': window_center,
-    'WindowWidth': window_width,
-    'BitsStored': bits_stored
-  }
-  return pixel_array, meta_data
-
-def get_hu_array(pixel_array, meta):
-	"""
-	HU値のNumPy配列に
-	"""
-	if pixel_array is None or meta is None:
-		return None
-
-	slope = meta.get('RescaleSlope', 1)
-	intercept = meta.get('RescaleIntercept', 0)
-
-	hu_array = pixel_array * slope + intercept
-	return hu_array
+    all_header_info = read_header.get_all_header_info(file)
+    if all_header_info:
+        print(all_header_info)
+    
+    print('---------------------')
+    # --- 実行例 ---
+    raw_data, rescale_tags = read_data.get_raw_pixel_data(file)
+    if raw_data is not None:
+        print(f"生のデータ形状: {raw_data.shape}")
+        print(f"Rescale Slope: {rescale_tags['slope']}, Intercept: {rescale_tags['intercept']}")
 
 
 
-
-pixel_array, meta = load_dicom_data(filepath)
-# print(pixel_array)
-print(meta)
-
-num_grayscale_levels = 2 ** meta['BitsStored']
-print(f'グレースケールレベル数: {num_grayscale_levels}')
-
-
+if __name__ == '__main__':
+    main()
