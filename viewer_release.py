@@ -84,7 +84,7 @@ class ImageDisplayWidget(QLabel):
             
             img_w, img_h = self.image_size
             
-            # --- 描画アスペクト比の計算 (変更なし) ---
+            # --- 描画アスペクト比の計算 ---
             aspect_ratio_correction = 1.0
             if self._is_mpr_view and self.current_plane != "Axial":
                  if self.pixel_spacing_xy > 0:
@@ -107,7 +107,7 @@ class ImageDisplayWidget(QLabel):
             pixmap = QPixmap.fromImage(qimage.scaled(draw_w, draw_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
             painter.drawPixmap(paste_x, paste_y, pixmap)
             
-            # 2. 参照線とスライス情報の描画 (変更なし)
+            # 2. 参照線とスライス情報の描画 
             is_mpr_view = self._is_mpr_view
             
             hu_data = None
@@ -169,7 +169,6 @@ class ImageDisplayWidget(QLabel):
         finally:
             painter.end()
 
-    # (マウス操作系は変更なし)
     def mousePressEvent(self, event: QMouseEvent):
         self._last_mouse_pos = event.pos()
         
@@ -218,7 +217,6 @@ class MPRViewWidget(QWidget):
         self.setup_ui()
         
     def setup_ui(self):
-        # ... (setup_ui は変更なし)
         grid_layout = QGridLayout(self)
         
         dummy_shape = (1, 1, 1) 
@@ -246,7 +244,6 @@ class MPRViewWidget(QWidget):
         grid_layout.setColumnStretch(1, 1)
 
     def _create_view_container(self, plane_name, shape):
-        # ... (_create_view_container は変更なし)
         container = QWidget(self)
         h_layout_main = QHBoxLayout(container)
         h_layout_main.setContentsMargins(0, 0, 0, 0)
@@ -288,7 +285,6 @@ class MPRViewWidget(QWidget):
 
 
     def load_mpr_data(self, hu_data_3d):
-        # ... (load_mpr_data は変更なし)
         self.all_slices_hu = hu_data_3d
         z, y, x = hu_data_3d.shape[0] // 2, hu_data_3d.shape[1] // 2, hu_data_3d.shape[2] // 2
         self.current_indices = [z, y, x]
@@ -306,7 +302,6 @@ class MPRViewWidget(QWidget):
         self.update_all_views()
 
     def _update_mpr_index_from_slider(self, plane, axis, value):
-        # ... (_update_mpr_index_from_slider は変更なし)
         if self.current_indices is None: return
         
         new_indices = list(self.current_indices)
@@ -350,12 +345,12 @@ class MPRViewWidget(QWidget):
                 view.h_slider.setValue(x)
             elif plane == "Coronal":
                 hu_slice = self.all_slices_hu[:, index, :]
-                hu_slice = np.flipud(hu_slice)  # ★★★ 修正: 上下反転 ★★★
+                hu_slice = np.flipud(hu_slice)  
                 view.v_slider.setValue(z)
                 view.h_slider.setValue(x)
             elif plane == "Sagittal":
                 hu_slice = self.all_slices_hu[:, :, index]
-                hu_slice = np.flipud(hu_slice)  # ★★★ 修正: 上下反転 ★★★
+                hu_slice = np.flipud(hu_slice) 
                 view.v_slider.setValue(z)
                 view.h_slider.setValue(y)
             
@@ -380,7 +375,6 @@ class MPRViewWidget(QWidget):
 class PyQtDicomViewer(QMainWindow):
     def __init__(self):
         super().__init__()
-        # ... (初期化処理は変更なし)
         self.setWindowTitle("Advanced DICOM Viewer")
         self.setGeometry(100, 100, 1200, 800)
         
@@ -402,7 +396,6 @@ class PyQtDicomViewer(QMainWindow):
         self.setup_ui()
         
     def create_menu(self):
-        # ... (メニュー作成は変更なし)
         menubar = self.menuBar()
         file_menu = menubar.addMenu("ファイル")
         
@@ -423,7 +416,6 @@ class PyQtDicomViewer(QMainWindow):
         self.mpr_view_action.setEnabled(False)
 
     def setup_ui(self):
-        # ... (UIセットアップは変更なし)
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
@@ -538,7 +530,6 @@ class PyQtDicomViewer(QMainWindow):
 
 
     def switch_view_mode(self, index):
-        # ... (switch_view_mode は変更なし)
         if index == 1 and self.all_slices_hu is None:
              QMessageBox.information(self, "情報", "DICOMシリーズを先に読み込んでください。")
              return
@@ -564,7 +555,6 @@ class PyQtDicomViewer(QMainWindow):
             self.load_dicom_folder(folder_path)
             
     def load_dicom_folder(self, folder_path):
-        # ... (DICOM読み込み・ソートは変更なし)
         temp_files = [os.path.join(folder_path, f) 
                                  for f in os.listdir(folder_path) 
                                  if f.lower().endswith('.dcm')]
@@ -624,7 +614,6 @@ class PyQtDicomViewer(QMainWindow):
 
 
     def on_plane_change(self, plane_name):
-        # ... (on_plane_change は変更なし)
         if self.all_slices_hu is None: return
         
         self.current_plane = plane_name
@@ -682,7 +671,7 @@ class PyQtDicomViewer(QMainWindow):
         self.update_info_panel() 
 
 
-    # --- W/L 関連のメソッド (変更なし) ---
+    # --- W/L 関連のメソッド ---
     def auto_adjust_wwl(self):
         if self.all_slices_hu is None: return
         
@@ -763,7 +752,6 @@ class PyQtDicomViewer(QMainWindow):
     # --- UIとナビゲーション (その他) ---
 
     def set_window_title(self, mode: str):
-        # ... (set_window_title は変更なし)
         if self.ds is None:
             self.setWindowTitle("Advanced DICOM Viewer")
             return
@@ -782,7 +770,6 @@ class PyQtDicomViewer(QMainWindow):
     def update_info_panel(self):
         if self.all_slices_hu is None: return # all_slices_huがない場合は表示しない
         
-        # ★★★ 修正: Axial以外の場合はファイル名/スライス数表示をデータに合わせて変更 ★★★
         is_axial_view = self.current_plane == "Axial"
         
         if is_axial_view and self.ds is not None:
@@ -847,21 +834,18 @@ class PyQtDicomViewer(QMainWindow):
         self._header_window = header_window 
 
     def on_slider_change(self, value):
-        # ... (on_slider_change は変更なし)
         new_index = int(value)
         if new_index != self.index:
             self.index = new_index
             self.load_image()
 
     def next_image(self):
-        # ... (next_image は変更なし)
         if self.all_slices_hu is None: return
         if self.index < self.slice_slider.maximum():
             self.index += 1
             self.load_image()
 
     def prev_image(self):
-        # ... (prev_image は変更なし)
         if self.all_slices_hu is None: return
         if self.index > 0:
             self.index -= 1
