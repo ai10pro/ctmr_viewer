@@ -23,7 +23,7 @@ pip install -r requirements.txt
 python viewer_release.py
 ```
 ### GitHubReleaseからコードをダウンロードし実行
-[GitHub-Release](https://github.com/ai10pro/ctmr_viewer/tree/v1.0.0)からソースまたはExeファイルをダウンロードする。
+[GitHub-Release](https://github.com/ai10pro/ctmr_viewer/tree/v1.0.1)からソースまたはExeファイルをダウンロードする。
 
 ソースの場合上記同様に仮想環境の構築と必要ライブラリのインストールを行い、実行することができます。
 
