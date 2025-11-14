@@ -53,8 +53,10 @@ class ImageDisplayWidget(QLabel):
         self.pan_x, self.pan_y = 0, 0
         
         self.setMouseTracking(True)
+        self.pixel_spacing_xy = 1.0
+        self.pixel_spacing_z = 1.0
         
-    def set_image_data(self, data_255: np.ndarray, ww, wl, slice_info="", indices=None, plane=None, is_mpr=False):
+    def set_image_data(self, data_255: np.ndarray, ww, wl, slice_info="", indices=None, plane=None, is_mpr=False, spacing_xy=1.0, spacing_z=1.0):
         self.img_data_255 = data_255
         self.ww, self.wl = ww, wl
         self.slice_info = slice_info
@@ -63,6 +65,9 @@ class ImageDisplayWidget(QLabel):
         self.current_slice_indices = indices
         self.current_plane = plane if plane else "Axial"
         self._is_mpr_view = is_mpr
+        
+        self.pixel_spacing_xy = spacing_xy
+        self.pixel_spacing_z = spacing_z
         
         self.update()
 
@@ -78,57 +83,78 @@ class ImageDisplayWidget(QLabel):
             qimage = numpy_to_qimage(self.img_data_255)
             
             img_w, img_h = self.image_size
-            scale = min(rect.width() / img_w, rect.height() / img_h) if img_w > 0 and img_h > 0 else 1.0
             
-            new_w = int(img_w * scale * self.zoom_factor)
-            new_h = int(img_h * scale * self.zoom_factor)
+            # --- 描画アスペクト比の計算 (変更なし) ---
+            aspect_ratio_correction = 1.0
+            if self._is_mpr_view and self.current_plane != "Axial":
+                 if self.pixel_spacing_xy > 0:
+                     aspect_ratio_correction = self.pixel_spacing_z / self.pixel_spacing_xy
             
-            paste_x = (rect.width() - new_w) // 2 + self.pan_x
-            paste_y = (rect.height() - new_h) // 2 + self.pan_y
+            image_aspect_ratio = img_h / img_w * aspect_ratio_correction
+
+            max_scale_w = rect.width() / img_w
+            max_scale_h = rect.height() / (img_h * aspect_ratio_correction)
             
-            # 1. 画像の描画
-            pixmap = QPixmap.fromImage(qimage.scaled(new_w, new_h, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            scale = min(max_scale_w, max_scale_h) if img_w > 0 and img_h > 0 else 1.0
+            
+            draw_w = int(img_w * scale * self.zoom_factor)
+            draw_h = int(img_h * scale * self.zoom_factor * aspect_ratio_correction)
+            
+            paste_x = (rect.width() - draw_w) // 2 + self.pan_x
+            paste_y = (rect.height() - draw_h) // 2 + self.pan_y
+            
+            # 1. 画像の描画 
+            pixmap = QPixmap.fromImage(qimage.scaled(draw_w, draw_h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation))
             painter.drawPixmap(paste_x, paste_y, pixmap)
             
-            # 2. 参照線とスライス情報の描画
+            # 2. 参照線とスライス情報の描画 (変更なし)
             is_mpr_view = self._is_mpr_view
             
-            # ★★★ 修正ロジック ★★★
-            view_container = self.parent() # ViewContainer (QWidget)
-            if view_container:
-                 mpr_widget = view_container.parent() # MPRViewWidgetを取得
-            else:
-                 mpr_widget = None
-
             hu_data = None
+            mpr_widget = None
+            if self.parent():
+                mpr_widget = self.parent().parent()
+            
             if mpr_widget and hasattr(mpr_widget, 'all_slices_hu'):
-                 hu_data = mpr_widget.all_slices_hu
+                hu_data = mpr_widget.all_slices_hu
 
-            # 参照線描画の条件チェック (強制表示)
-            if is_mpr_view and self.current_slice_indices is not None and self.image_size != (0, 0) and hu_data is not None:
+            if is_mpr_view and self.current_slice_indices is not None and hu_data is not None:
                 
                 painter.setRenderHint(QPainter.Antialiasing)
-                img_rect = QRectF(paste_x, paste_y, new_w, new_h)
+                img_rect = QRectF(paste_x, paste_y, draw_w, draw_h)
                 z, y, x = self.current_slice_indices
                 max_z, max_y, max_x = hu_data.shape
 
-                # 参照線
-                painter.setPen(QColor(255, 0, 0))
-                
                 if self.current_plane == "Axial":
-                    y_pos = img_rect.top() + (y / max_y) * img_rect.height()
-                    x_pos = img_rect.left() + (x / max_x) * img_rect.width()
+                    y_ratio = y / max_y
+                    x_ratio = x / max_x
+                    y_pos = img_rect.top() + y_ratio * img_rect.height()
+                    x_pos = img_rect.left() + x_ratio * img_rect.width()
+                    painter.setPen(QColor(0, 255, 0)) # Coronal line (Y-line)
                     painter.drawLine(img_rect.left(), y_pos, img_rect.right(), y_pos)
+                    painter.setPen(QColor(0, 0, 255)) # Sagittal line (X-line)
                     painter.drawLine(x_pos, img_rect.top(), x_pos, img_rect.bottom())
+                    
                 elif self.current_plane == "Coronal":
-                    z_pos = img_rect.top() + (z / max_z) * img_rect.height()
-                    x_pos = img_rect.left() + (x / max_x) * img_rect.width()
+                    # Z軸 (縦) はZインデックスが0で画像上部に対応
+                    z_ratio = z / max_z
+                    x_ratio = x / max_x
+                    z_pos = img_rect.top() + z_ratio * img_rect.height()
+                    x_pos = img_rect.left() + x_ratio * img_rect.width()
+                    painter.setPen(QColor(0, 255, 0)) # Axial line (Z-line)
                     painter.drawLine(img_rect.left(), z_pos, img_rect.right(), z_pos)
+                    painter.setPen(QColor(0, 0, 255)) # Sagittal line (X-line)
                     painter.drawLine(x_pos, img_rect.top(), x_pos, img_rect.bottom())
+
                 elif self.current_plane == "Sagittal":
-                    z_pos = img_rect.top() + (z / max_z) * img_rect.height()
-                    y_pos = img_rect.left() + (y / max_y) * img_rect.width()
+                    # Z軸 (縦) はZインデックスが0で画像上部に対応
+                    z_ratio = z / max_z
+                    y_ratio = y / max_y
+                    z_pos = img_rect.top() + z_ratio * img_rect.height()
+                    y_pos = img_rect.left() + y_ratio * img_rect.width()
+                    painter.setPen(QColor(0, 255, 0)) # Axial line (Z-line)
                     painter.drawLine(img_rect.left(), z_pos, img_rect.right(), z_pos)
+                    painter.setPen(QColor(255, 0, 0)) # Coronal line (Y-line)
                     painter.drawLine(y_pos, img_rect.top(), y_pos, img_rect.bottom())
 
             # スライス情報テキスト (左下)
@@ -137,13 +163,13 @@ class ImageDisplayWidget(QLabel):
                 font = QFont("Arial", 16, QFont.Bold)
                 painter.setFont(font)
                 text_x = paste_x + 10
-                text_y = paste_y + new_h - 10
+                text_y = paste_y + draw_h - 10 
                 painter.drawText(text_x, text_y, self.slice_info)
 
         finally:
             painter.end()
 
-    # --- マウス操作 (MPRパネル内でのW/L調整を可能にするため、ここではイベントを処理) ---
+    # (マウス操作系は変更なし)
     def mousePressEvent(self, event: QMouseEvent):
         self._last_mouse_pos = event.pos()
         
@@ -190,8 +216,9 @@ class MPRViewWidget(QWidget):
         self.current_indices = None
         
         self.setup_ui()
-
+        
     def setup_ui(self):
+        # ... (setup_ui は変更なし)
         grid_layout = QGridLayout(self)
         
         dummy_shape = (1, 1, 1) 
@@ -219,7 +246,7 @@ class MPRViewWidget(QWidget):
         grid_layout.setColumnStretch(1, 1)
 
     def _create_view_container(self, plane_name, shape):
-        """ImageDisplayWidgetとスクロールバーを結合したコンテナを作成"""
+        # ... (_create_view_container は変更なし)
         container = QWidget(self)
         h_layout_main = QHBoxLayout(container)
         h_layout_main.setContentsMargins(0, 0, 0, 0)
@@ -231,7 +258,7 @@ class MPRViewWidget(QWidget):
         
         # 垂直スライダー (左側に縦置き)
         v_slider = QSlider(Qt.Vertical)
-        v_slider.setInvertedAppearance(True) 
+        v_slider.setInvertedAppearance(True) # Z軸のインデックスは大きいほど頭側になることが多い
         v_slider.setRange(0, shape[1] - 1)
         v_slider.valueChanged.connect(lambda v: self._update_mpr_index_from_slider(plane_name, 'y' if plane_name == 'Axial' else 'z', v))
         h_layout_main.addWidget(v_slider, 0)
@@ -241,7 +268,7 @@ class MPRViewWidget(QWidget):
         v_container.setContentsMargins(0, 0, 0, 0)
         v_container.setSpacing(0)
         
-        view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding) # 明示的に拡張ポリシーを設定
+        view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         v_container.addWidget(view, 1) 
         
         # 水平スライダー (画像の下に横置き)
@@ -259,7 +286,9 @@ class MPRViewWidget(QWidget):
         
         return container
 
+
     def load_mpr_data(self, hu_data_3d):
+        # ... (load_mpr_data は変更なし)
         self.all_slices_hu = hu_data_3d
         z, y, x = hu_data_3d.shape[0] // 2, hu_data_3d.shape[1] // 2, hu_data_3d.shape[2] // 2
         self.current_indices = [z, y, x]
@@ -277,6 +306,7 @@ class MPRViewWidget(QWidget):
         self.update_all_views()
 
     def _update_mpr_index_from_slider(self, plane, axis, value):
+        # ... (_update_mpr_index_from_slider は変更なし)
         if self.current_indices is None: return
         
         new_indices = list(self.current_indices)
@@ -298,23 +328,34 @@ class MPRViewWidget(QWidget):
         ww, wl = self.parent.ww, self.parent.wl
         lower, upper = wl - ww / 2, wl + ww / 2
         
+        pixel_spacing = self.parent.pixel_spacing 
+        slice_thickness = self.parent.slice_thickness 
+        
+        sp_y, sp_x, st = 1.0, 1.0, 1.0
+        if pixel_spacing is not None and slice_thickness is not None:
+             sp_y, sp_x = pixel_spacing
+             st = slice_thickness
+        
         views_map = {
-            "Axial": (self.axial_view, z),
-            "Coronal": (self.coronal_view, y),
-            "Sagittal": (self.sagittal_view, x),
+            # 縦Y/横X, 縦Z/横X, 縦Z/横Y の順でピクセル間隔を渡す
+            "Axial": (self.axial_view, z, st, sp_y),
+            "Coronal": (self.coronal_view, y, st, sp_x), 
+            "Sagittal": (self.sagittal_view, x, st, sp_y), 
         }
         
-        for plane, (view, index) in views_map.items():
+        for plane, (view, index, spacing_z, spacing_xy) in views_map.items():
             if plane == "Axial":
                 hu_slice = self.all_slices_hu[index, :, :]
                 view.v_slider.setValue(y) 
                 view.h_slider.setValue(x)
             elif plane == "Coronal":
                 hu_slice = self.all_slices_hu[:, index, :]
+                hu_slice = np.flipud(hu_slice)  # ★★★ 修正: 上下反転 ★★★
                 view.v_slider.setValue(z)
                 view.h_slider.setValue(x)
             elif plane == "Sagittal":
                 hu_slice = self.all_slices_hu[:, :, index]
+                hu_slice = np.flipud(hu_slice)  # ★★★ 修正: 上下反転 ★★★
                 view.v_slider.setValue(z)
                 view.h_slider.setValue(y)
             
@@ -327,16 +368,19 @@ class MPRViewWidget(QWidget):
             
             # ビューを更新
             view.set_image_data(img_data_255, ww, wl, 
-                                slice_info=slice_info, 
-                                indices=self.current_indices,
-                                plane=plane,
-                                is_mpr=True)
+                                 slice_info=slice_info, 
+                                 indices=self.current_indices,
+                                 plane=plane,
+                                 is_mpr=True,
+                                 spacing_xy=spacing_xy,
+                                 spacing_z=spacing_z)
 
 
 # --- 4. メインビューワーウィンドウ (PyQtDicomViewer) ---
 class PyQtDicomViewer(QMainWindow):
     def __init__(self):
         super().__init__()
+        # ... (初期化処理は変更なし)
         self.setWindowTitle("Advanced DICOM Viewer")
         self.setGeometry(100, 100, 1200, 800)
         
@@ -349,11 +393,16 @@ class PyQtDicomViewer(QMainWindow):
         self.show_mpr_lines = True
         
         self.ww, self.wl = 400.0, 40.0
+        
+        self.pixel_spacing = None
+        self.slice_thickness = None
+        self.slice_locations = {}
 
         self.create_menu()
         self.setup_ui()
         
     def create_menu(self):
+        # ... (メニュー作成は変更なし)
         menubar = self.menuBar()
         file_menu = menubar.addMenu("ファイル")
         
@@ -374,6 +423,7 @@ class PyQtDicomViewer(QMainWindow):
         self.mpr_view_action.setEnabled(False)
 
     def setup_ui(self):
+        # ... (UIセットアップは変更なし)
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
@@ -488,11 +538,11 @@ class PyQtDicomViewer(QMainWindow):
 
 
     def switch_view_mode(self, index):
-        """ビューモードを切り替える (0: 単断面, 1: MPR)"""
+        # ... (switch_view_mode は変更なし)
         if index == 1 and self.all_slices_hu is None:
              QMessageBox.information(self, "情報", "DICOMシリーズを先に読み込んでください。")
              return
-             
+            
         self.view_stack.setCurrentIndex(index)
         
         if index == 1:
@@ -506,10 +556,6 @@ class PyQtDicomViewer(QMainWindow):
             self.on_plane_change(self.current_plane)
             self.set_window_title("単断面表示")
             
-    def toggle_mpr_lines(self):
-        pass
-
-
     # --- データの読み込みと更新 (Load) ---
 
     def load_dicom_folder_dialog(self):
@@ -518,17 +564,28 @@ class PyQtDicomViewer(QMainWindow):
             self.load_dicom_folder(folder_path)
             
     def load_dicom_folder(self, folder_path):
-        self.files = sorted([os.path.join(folder_path, f) 
-                             for f in os.listdir(folder_path) 
-                             if f.lower().endswith('.dcm')])
-        if not self.files:
+        # ... (DICOM読み込み・ソートは変更なし)
+        temp_files = [os.path.join(folder_path, f) 
+                                 for f in os.listdir(folder_path) 
+                                 if f.lower().endswith('.dcm')]
+        
+        if not temp_files:
             QMessageBox.critical(self, "エラー", "DICOMファイルが見つかりませんでした。")
             return
         
+        unsorted_slices = []
+        slice_locations = {}
+        first_ds = None
+        
         try:
-            slices = []
-            for filepath in self.files:
+            for filepath in temp_files:
                 ds = pydicom.dcmread(filepath)
+                
+                location = getattr(ds, 'SliceLocation', None)
+                if location is None:
+                    location = getattr(ds, 'ImagePositionPatient', [0, 0, 0])[2] 
+                slice_locations[filepath] = location
+                
                 raw_array = ds.pixel_array
                 is_big_endian = not ds.file_meta.TransferSyntaxUID.is_little_endian
                 if is_big_endian:
@@ -537,11 +594,22 @@ class PyQtDicomViewer(QMainWindow):
                 pixel_array = raw_array.astype(np.float32)
                 slope = getattr(ds, 'RescaleSlope', 1.0)
                 intercept = getattr(ds, 'RescaleIntercept', 0.0)
-                slices.append(pixel_array * slope + intercept)
+                hu_slice = pixel_array * slope + intercept
+                
+                unsorted_slices.append((filepath, location, hu_slice, ds))
+                
+                if first_ds is None:
+                     first_ds = ds
+                     
+            sorted_slices = sorted(unsorted_slices, key=lambda x: x[1])
             
-            self.all_slices_hu = np.stack(slices)
-            self.ds = ds
+            self.files = [s[0] for s in sorted_slices]
+            self.all_slices_hu = np.stack([s[2] for s in sorted_slices])
+            self.ds = first_ds
             
+            self.pixel_spacing = [float(p) for p in getattr(self.ds, 'PixelSpacing', [1.0, 1.0])]
+            self.slice_thickness = float(getattr(self.ds, 'SliceThickness', 1.0))
+
             self.index = 0
             self.slice_slider.setRange(0, self.all_slices_hu.shape[0] - 1)
             self.mpr_view_action.setEnabled(True)
@@ -556,6 +624,7 @@ class PyQtDicomViewer(QMainWindow):
 
 
     def on_plane_change(self, plane_name):
+        # ... (on_plane_change は変更なし)
         if self.all_slices_hu is None: return
         
         self.current_plane = plane_name
@@ -575,14 +644,30 @@ class PyQtDicomViewer(QMainWindow):
     def load_image(self, is_new_series=False):
         if self.all_slices_hu is None: return
         
+        # 幾何学情報（読み込み時に設定済み）
+        sp_y, sp_x, st = 1.0, 1.0, 1.0
+        if self.pixel_spacing and self.slice_thickness:
+             sp_y, sp_x = self.pixel_spacing
+             st = self.slice_thickness
+        
+        # 断面データの抽出と上下反転処理
         if self.current_plane == "Axial":
             self.hu_data = self.all_slices_hu[self.index, :, :]
+            spacing_xy = sp_x # 横軸Xの間隔
+            spacing_z = sp_y  # 縦軸Yの間隔
         elif self.current_plane == "Coronal":
             self.hu_data = self.all_slices_hu[:, self.index, :]
+            self.hu_data = np.flipud(self.hu_data)  # ★★★ 修正: 上下反転 ★★★
+            spacing_xy = sp_x # 横軸Xの間隔
+            spacing_z = st    # 縦軸Zの間隔 (スライス厚)
         elif self.current_plane == "Sagittal":
             self.hu_data = self.all_slices_hu[:, :, self.index]
+            self.hu_data = np.flipud(self.hu_data)  # ★★★ 修正: 上下反転 ★★★
+            spacing_xy = sp_y # 横軸Yの間隔
+            spacing_z = st    # 縦軸Zの間隔 (スライス厚)
         
         if is_new_series:
+            # ... (W/L範囲設定とオート調整は変更なし)
             self.pixel_min = int(self.all_slices_hu.min())
             self.pixel_max = int(self.all_slices_hu.max())
             
@@ -590,15 +675,14 @@ class PyQtDicomViewer(QMainWindow):
             self.ww_slider.setRange(1, self.pixel_max - self.pixel_min)
             self.auto_adjust_wwl()
         else:
-            self.update_image()
+            self.update_image(spacing_xy=spacing_xy, spacing_z=spacing_z) # 幾何学情報を渡す
         
         self.slice_slider.setValue(self.index)
         self.image_widget.zoom_factor, self.image_widget.pan_x, self.image_widget.pan_y = 1.0, 0, 0
         self.update_info_panel() 
 
 
-    # --- W/L 関連のメソッド ---
-
+    # --- W/L 関連のメソッド (変更なし) ---
     def auto_adjust_wwl(self):
         if self.all_slices_hu is None: return
         
@@ -631,7 +715,7 @@ class PyQtDicomViewer(QMainWindow):
         self.update_info_panel()
 
 
-    def update_image(self):
+    def update_image(self, spacing_xy=1.0, spacing_z=1.0):
         if self.hu_data is None: return
         
         lower, upper = self.wl - self.ww / 2, self.wl + self.ww / 2
@@ -648,23 +732,28 @@ class PyQtDicomViewer(QMainWindow):
 
         slice_info_str = f"{self.index + 1}/{self.slice_slider.maximum() + 1} ({self.current_plane})"
         
+        # MPR参照線用の座標インデックスを設定
         if self.all_slices_hu is not None:
-            max_z, max_y, max_x = self.all_slices_hu.shape
-            if self.current_plane == "Axial":
-                current_indices = [self.index, max_y // 2, max_x // 2]
-            elif self.current_plane == "Coronal":
-                current_indices = [max_z // 2, self.index, max_x // 2]
-            else: 
-                current_indices = [max_z // 2, max_y // 2, self.index]
+             max_z, max_y, max_x = self.all_slices_hu.shape
+             
+             # Axial, Coronal, Sagittal表示時、参照線は中心点とする
+             if self.current_plane == "Axial":
+                 current_indices = [self.index, max_y // 2, max_x // 2]
+             elif self.current_plane == "Coronal":
+                 current_indices = [max_z // 2, self.index, max_x // 2]
+             else: 
+                 current_indices = [max_z // 2, max_y // 2, self.index]
         else:
             current_indices = None
-
+            spacing_xy, spacing_z = 1.0, 1.0 # 既に引数として渡されているが念のため
 
         self.image_widget.set_image_data(img_data_255, self.ww, self.wl, 
                                          slice_info=slice_info_str,
                                          indices=current_indices,
                                          plane=self.current_plane,
-                                         is_mpr=False)
+                                         is_mpr=False,
+                                         spacing_xy=spacing_xy,
+                                         spacing_z=spacing_z)
         self.image_widget.update()
         
         if self.view_stack.currentIndex() == 1:
@@ -674,7 +763,7 @@ class PyQtDicomViewer(QMainWindow):
     # --- UIとナビゲーション (その他) ---
 
     def set_window_title(self, mode: str):
-        """現在のファイル情報とビューモードに基づいてウィンドウ名を更新する"""
+        # ... (set_window_title は変更なし)
         if self.ds is None:
             self.setWindowTitle("Advanced DICOM Viewer")
             return
@@ -691,19 +780,38 @@ class PyQtDicomViewer(QMainWindow):
 
 
     def update_info_panel(self):
-        if self.ds is None: return
+        if self.all_slices_hu is None: return # all_slices_huがない場合は表示しない
         
-        is_little_endian = self.ds.file_meta.TransferSyntaxUID.is_little_endian
+        # ★★★ 修正: Axial以外の場合はファイル名/スライス数表示をデータに合わせて変更 ★★★
+        is_axial_view = self.current_plane == "Axial"
+        
+        if is_axial_view and self.ds is not None:
+             filename_info = os.path.basename(self.files[self.index]) if self.files and 0 <= self.index < len(self.files) else 'N/A'
+             slice_info = f"{self.index + 1}/{len(self.files)}"
+        else:
+             # Coronal/Sagittalの単断面表示の場合、ファイルではなくボリュームからの抽出
+             filename_info = f"MPR ({self.current_plane})"
+             slice_info = f"{self.index + 1}/{self.slice_slider.maximum() + 1}"
+        
+        # 共通情報
+        ds = self.ds if self.ds is not None else pydicom.Dataset()
+        
+        is_little_endian = ds.file_meta.TransferSyntaxUID.is_little_endian if hasattr(ds, 'file_meta') else True
         endian_info = "Little Endian" if is_little_endian else "Big Endian"
         
+        spacing_info = "N/A"
+        if self.pixel_spacing and self.slice_thickness:
+             spacing_info = f"XY:{self.pixel_spacing[1]:.2f}x{self.pixel_spacing[0]:.2f}, Z:{self.slice_thickness:.2f} (mm)"
+             
         info = {
-            "ファイル名": os.path.basename(self.files[self.index]),
-            "スライス": f"{self.index + 1}/{len(self.files)}",
-            "患者名": getattr(self.ds, 'PatientName', 'N/A'),
-            "患者ID": getattr(self.ds, 'PatientID', 'N/A'),
-            "撮影日": getattr(self.ds, 'StudyDate', 'N/A'),
+            "ファイル名": filename_info,
+            "スライス": slice_info,
+            "患者名": getattr(ds, 'PatientName', 'N/A'),
+            "患者ID": getattr(ds, 'PatientID', 'N/A'),
+            "撮影日": getattr(ds, 'StudyDate', 'N/A'),
             "WW/WL": f"{int(self.ww)}/{int(self.wl)}",
             "ズーム": f"{self.image_widget.zoom_factor:.2f}",
+            "解像度/間隔": spacing_info,
             "エンディアン": endian_info
         }
         
@@ -714,17 +822,24 @@ class PyQtDicomViewer(QMainWindow):
         self.info_text.setText(info_text)
 
     def show_full_dicom_header(self):
-        if self.ds is None: 
+        # ... (Axial以外ではヘッダ表示不可とする)
+        if self.all_slices_hu is None: 
             QMessageBox.information(self, "情報", "DICOMファイルが読み込まれていません。")
             return
             
+        if self.current_plane != "Axial":
+            QMessageBox.information(self, "情報", "Coronal/Sagittalビューは再構成された画像のため、個別のDICOMヘッダは表示できません。Axialビューに切り替えてください。")
+            return
+
         header_window = QWidget()
         header_window.setWindowTitle(f"DICOMヘッダ全体 - {os.path.basename(self.files[self.index])}")
         header_window.setGeometry(150, 150, 600, 800)
         
+        ds = pydicom.dcmread(self.files[self.index])
+        
         text_widget = QTextEdit()
         text_widget.setReadOnly(True)
-        text_widget.setText(str(self.ds))
+        text_widget.setText(str(ds))
         
         layout = QVBoxLayout(header_window)
         layout.addWidget(text_widget)
@@ -732,17 +847,22 @@ class PyQtDicomViewer(QMainWindow):
         self._header_window = header_window 
 
     def on_slider_change(self, value):
+        # ... (on_slider_change は変更なし)
         new_index = int(value)
         if new_index != self.index:
             self.index = new_index
             self.load_image()
 
     def next_image(self):
+        # ... (next_image は変更なし)
+        if self.all_slices_hu is None: return
         if self.index < self.slice_slider.maximum():
             self.index += 1
             self.load_image()
 
     def prev_image(self):
+        # ... (prev_image は変更なし)
+        if self.all_slices_hu is None: return
         if self.index > 0:
             self.index -= 1
             self.load_image()

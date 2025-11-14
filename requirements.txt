@@ -1,4 +1,5 @@
 numpy==2.3.3
+pillow==12.0.0
 pydicom==3.0.1
 pyqtgraph==0.13.7
 PySide6==6.10.0
