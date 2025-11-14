@@ -15,7 +15,7 @@
 
 ## ユーザーマニュアル
 
-ユーザーマニュアルは別紙に記載されています。
+[ユーザーマニュアル (JP)](./MANUAL_JP.md)
 
 ## 開発環境 (Development Environment)
 
